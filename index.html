@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Binance Portfolio Tracker</title>
+  <style>
+    body {
+      font-family: "Times New Roman", Times, serif;
+      background: #111;
+      color: #eee;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #1c1c1c;
+    }
+    th, td {
+      border: 1px solid #444;
+      padding: 8px;
+      text-align: center;
+    }
+    th {
+      background: #222;
+      cursor: pointer;
+    }
+    .positive {
+      color: limegreen;
+    }
+    .negative {
+      color: red;
+    }
+    button {
+      margin-bottom: 10px;
+      padding: 8px 12px;
+      font-size: 16px;
+      background-color: #333;
+      color: #eee;
+      border: 1px solid #666;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #444;
+    }
+	.neutral-row {
+	  background-color: #333 !important;
+	}
+  </style>
+</head>
+<body>
+  <h1>Copy-Trade Positions Monitor</h1>
+  <button onclick="sortTableByPNL()">PNL</button>
+  <table>
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th>Side</th>
+        <th>Leverage</th>
+        <th>Vol ($)</th>
+        <th>Entry</th>
+        <th>Current</th>
+        <th>PNL (%)</th>
+      </tr>
+    </thead>
+    <tbody id="positions"></tbody>
+  </table>
+
+  <script>
+    let portfolioIds = [];
+    let currentIndex = 0;
+    const delay = 1000;
+
+    async function loadIDs() {
+      try {
+        const response = await fetch('https://majestic-pavlova-e879a2.netlify.app/list.txt');
+        const text = await response.text();
+        portfolioIds = text.split('\n').map(id => id.trim()).filter(id => id !== '');
+        startPolling();
+      } catch (err) {
+        console.error("Не вдалося завантажити list.txt:", err);
+      }
+    }
+
+    function getNextPortfolioId() {
+      const id = portfolioIds[currentIndex];
+      currentIndex = (currentIndex + 1) % portfolioIds.length;
+      return id;
+    }
+
+    async function fetchPosition(id) {
+      try {
+       const response = await fetch(`/.netlify/functions/proxy?portfolioId=${id}`);
+
+       const json = await response.json();
+
+        if (json && Array.isArray(json.data) && json.data.length > 0) {
+          renderPositions(id, json.data);
+        } else {
+          clearPositions(id);
+        }
+      } catch (err) {
+        console.error("Помилка запиту:", err);
+      }
+    }
+
+    function renderPositions(id, positions) {
+      const tbody = document.getElementById('positions');
+
+      const filtered = positions.filter(pos =>
+        parseFloat(pos.cumRealized) !== 0 &&
+        parseFloat(pos.positionAmount) !== 0
+      );
+
+      filtered.forEach(pos => {
+        const symbolKey = `${id}-${pos.symbol}-${pos.positionSide}`;
+        const existingRow = document.querySelector(`tr[data-key="${symbolKey}"]`);
+
+        const notionalValue = formatNumberWithSpaces(parseFloat(Math.abs(pos.notionalValue)));
+        const pnl = calculatePotentialProfit(pos.entryPrice, pos.markPrice, pos.positionSide);
+        const pnlClass = pnl > 0 ? "positive" : "negative";
+
+        const rowHTML = `
+          <td><strong>${pos.symbol}</strong></td>
+          <td>${pos.positionSide}</td>
+          <td>${pos.leverage}x</td>
+          <td>$${notionalValue}</td>
+          <td>${pos.entryPrice}</td>
+          <td>${pos.markPrice}</td>
+          <td class="${pnlClass}" data-pnl="${pnl.toFixed(2)}">${pnl.toFixed(2)}%</td>
+        `;
+
+        if (existingRow) {
+          existingRow.innerHTML = rowHTML;
+        } else {
+          const row = document.createElement('tr');
+          row.setAttribute('data-key', symbolKey);
+          row.innerHTML = rowHTML;
+          tbody.appendChild(row);
+        }
+      });
+    }
+
+    function formatNumberWithSpaces(number) {
+      const num = Math.round(number);
+      return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+    }
+
+    function calculatePotentialProfit(entryPrice, markPrice, positionSide) {
+      const priceChange = ((markPrice - entryPrice) / entryPrice) * 100;
+      const profitPercent = positionSide === "SHORT" ? -priceChange : priceChange;
+      return profitPercent;
+    }
+
+    function clearPositions(id) {
+      const rows = document.querySelectorAll(`tr[data-key^="${id}-"]`);
+      rows.forEach(row => row.remove());
+    }
+
+	function sortTableByPNL() {
+	  const tbody = document.getElementById('positions');
+	  const rows = Array.from(tbody.querySelectorAll('tr'));
+
+	  rows.sort((a, b) => {
+	    const aPNL = parseFloat(a.querySelector('[data-pnl]').dataset.pnl);
+	    const bPNL = parseFloat(b.querySelector('[data-pnl]').dataset.pnl);
+	    return aPNL - bPNL;
+	  });
+
+	  // Очистити та додати по-новому
+	  tbody.innerHTML = '';
+	  rows.forEach(row => {
+	    const pnl = parseFloat(row.querySelector('[data-pnl]').dataset.pnl);
+	    if (pnl >= -1 && pnl <= 1) {
+	      row.classList.add('neutral-row');
+	    } else {
+	      row.classList.remove('neutral-row');
+	    }
+	    tbody.appendChild(row);
+	  });
+	}
+
+
+    function startPolling() {
+      if (portfolioIds.length === 0) {
+        console.error("Список ID порожній.");
+        return;
+      }
+
+      setInterval(() => {
+        const id = getNextPortfolioId();
+        fetchPosition(id);
+      }, delay);
+    }
+
+    loadIDs();
+  </script>
+</body>
+</html>
