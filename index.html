@@ -71,7 +71,7 @@
 
     async function loadIDs() {
       try {
-        const response = await fetch('https://majestic-pavlova-e879a2.netlify.app/list.txt');
+        const response = await fetch('list.txt');
         const text = await response.text();
         portfolioIds = text.split('\n').map(id => id.trim()).filter(id => id !== '');
         startPolling();
